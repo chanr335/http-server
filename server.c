@@ -11,7 +11,10 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 
+#include <regex.h>
+
 #define PORT "3000"
+#define BUFFER_SIZE 50
 
 void sigchld_handler(int s){
     (void)s; // quiet unused variable warning
@@ -83,10 +86,31 @@ int getListener(void){
     return sockfd;
 }
 
+void handle_client(int clientfd){
+    char *buffer = (char *)malloc(BUFFER_SIZE * sizeof(char));
+    ssize_t bytes_received;
+    
+    if((bytes_received = recv(clientfd, buffer, BUFFER_SIZE, 0)) == -1){ //store into buffer
+        perror("recv");
+        return;
+    }
+
+    regex_t regex;
+    regcomp(&regex, "^GET /([^ ]*) HTTP/1", REG_EXTENDED);
+    regmatch_t matches[2];
+
+    if (regexec(&regex, buffer, 2, matches, 0) == 0){
+        buffer[matches[1].rm_eo] = '\0';
+        const char *url_encoded_file_name = buffer + matches[1].rm_so;
+        // char *file_name = ntohl(url_encoded_file_name); //idfk how to decode the url
+        printf("file_name: %s", url_encoded_file_name);
+    }
+}
+
 int main(int argc, char* argv[]){
     struct sockaddr_storage their_addr;
     socklen_t sin_size;
-    int newfd, numbytes;
+    int clientfd;
     char s[INET6_ADDRSTRLEN];
 
     char hostname[20];
@@ -94,9 +118,9 @@ int main(int argc, char* argv[]){
         printf("Hostname: %s\n", hostname);
     }
 
-    int listener = getListener();
-    if (listener == -1) {
-        printf("listener descriptor failed: %d", listener);
+    int serverfd = getListener();
+    if (serverfd == -1) {
+        printf("listener descriptor failed: %d", serverfd);
     }
 
     struct sigaction sa;
@@ -112,8 +136,8 @@ int main(int argc, char* argv[]){
 
     while (1) {
         sin_size = sizeof their_addr;
-        newfd = accept(listener, (struct sockaddr *)&their_addr, &sin_size);
-        if (newfd == -1) {
+        clientfd = accept(serverfd, (struct sockaddr *)&their_addr, &sin_size);
+        if (clientfd == -1) {
             perror("accept");
             continue;
         }
@@ -124,13 +148,12 @@ int main(int argc, char* argv[]){
         printf("server: got connection from %s\n", s);
         
         if(!fork()){
-            close(listener); 
-            if(send(newfd, "test", 4, 0) == -1)
-                perror("send");
-            close(newfd);
+            close(serverfd); 
+            handle_client(clientfd);
+            close(clientfd);
             exit(0);
         }
-        close(newfd);
+        close(clientfd);
     }
     return 0;
 }

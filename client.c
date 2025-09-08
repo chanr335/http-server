@@ -10,8 +10,10 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 
+#include <regex.h>
+
 #define PORT "3000"
-#define MAXDATASIZE 100 // max number of bytes we can get at once
+#define BUFFER_SIZE 50
 
 void *get_in_addr(struct sockaddr *sa){
     if (sa ->sa_family == AF_INET){
@@ -21,7 +23,7 @@ void *get_in_addr(struct sockaddr *sa){
 }
 
 int findListener(char *hostname){
-    int sockfd;
+    int serverfd;
     struct addrinfo hints, *servinfo, *p;
     int rv;
     char s[INET6_ADDRSTRLEN];
@@ -36,7 +38,7 @@ int findListener(char *hostname){
     }
 
     for(p = servinfo; p != NULL; p = p->ai_next){
-        if((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1){
+        if((serverfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1){
             perror("client: socket");
             continue;
         }
@@ -44,9 +46,9 @@ int findListener(char *hostname){
         inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr), s, sizeof s);
         printf("client: attempting conenction to %s\n", s);
 
-        if(connect(sockfd, p->ai_addr, p->ai_addrlen) == -1){
+        if(connect(serverfd, p->ai_addr, p->ai_addrlen) == -1){
             perror("client: connect");
-            close(sockfd);
+            close(serverfd);
             continue;
         }
 
@@ -63,30 +65,30 @@ int findListener(char *hostname){
 
     freeaddrinfo(servinfo);
 
-    return sockfd;
+    return serverfd;
 }
 
 int main(int argc, char *argv[]){
     int numbytes;
-    char buf[MAXDATASIZE];
+    char buf[] = "GET /rfc1945f.html HTTP/1";
 
     if(argc != 2){
         fprintf(stderr, "usage: client hostname\n");
         exit(1);
     }
 
-    int sockfd = findListener(argv[1]);
-    if(sockfd == -1){
-        printf("finding listener descriptor failed: %d", sockfd);
+    int serverfd = findListener(argv[1]);
+    if(serverfd == -1){
+        printf("finding listener descriptor failed: %d", serverfd);
     }
 
-    if ((numbytes = recv(sockfd, buf, MAXDATASIZE-1, 0)) == -1){
-        perror("recv");
+    if ((numbytes = send(serverfd, buf, BUFFER_SIZE-1, 0)) == -1){
+        perror("send");
         exit(1);
     }
 
     buf[numbytes] = '\0';
-    printf("client: received '%s'\n", buf);
-    close(sockfd);
+    // printf("client: received '%s'\n", buf);
+    close(serverfd);
     return 0;
 }
