@@ -12,6 +12,8 @@
 #include <arpa/inet.h>
 
 #include <regex.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 #define PORT "3000"
 #define BUFFER_SIZE 50
@@ -86,6 +88,48 @@ int getListener(void){
     return sockfd;
 }
 
+void make_http_response(const char *file_name, const char *file_ext, char *response, size_t *response_len){
+
+    // build the HTTP header
+    char *mime_type = "text/html";
+    char *header = (char *)malloc(BUFFER_SIZE * sizeof(char));
+    snprintf(header, BUFFER_SIZE,
+           "HTTP/1.0 200 OK\r\n"
+           "Content-Type: %s\r\n"
+           "\r\n",
+           mime_type);
+
+    // if file DNE, return 404
+    int file_fd = open(file_name, O_RDONLY);
+    if (file_fd == -1){
+        printf("HTTP/1.0 404 Not Found\r\n"
+               "Content-Type: text/plain\r\n"
+               "\r\n"
+               "404 Not Found");
+        *response_len = strlen(response);
+        return;
+    }
+
+    // get file size for content length
+    struct stat file_stat;
+    fstat(file_fd, &file_stat);
+    off_t file_size = file_stat.st_size;
+
+    // copy header to response buffer
+    *response_len = 0;
+    memcpy(response, header, strlen(header));
+    *response_len += strlen(header);
+
+    // copy file to response buffer
+    ssize_t bytes_read;
+    while ((bytes_read = read(file_fd,
+                              response + *response_len,
+                              BUFFER_SIZE - *response_len)) > 0){ *response_len += bytes_read;}
+
+    free(header);
+    close(file_fd);
+}
+
 void handle_client(int clientfd){
     char *buffer = (char *)malloc(BUFFER_SIZE * sizeof(char));
     ssize_t bytes_received;
@@ -102,9 +146,23 @@ void handle_client(int clientfd){
     if (regexec(&regex, buffer, 2, matches, 0) == 0){
         buffer[matches[1].rm_eo] = '\0';
         const char *url_encoded_file_name = buffer + matches[1].rm_so;
-        // char *file_name = ntohl(url_encoded_file_name); //idfk how to decode the url
-        printf("file_name: %s", url_encoded_file_name);
+        char *file_name = url_encoded_file_name;
+
+        printf("filename: %s\n", file_name);
+
+        char file_extension[] = "html";
+
+        char *response = (char *)malloc(BUFFER_SIZE * 2 * sizeof(char));
+        size_t response_len;
+        make_http_response(file_name, file_extension, response, &response_len);
+
+        send(clientfd, response, response_len, 0);
+
+        free(response);
     }
+    regfree(&regex);
+    close(clientfd);
+    free(buffer);
 }
 
 int main(int argc, char* argv[]){
@@ -120,7 +178,7 @@ int main(int argc, char* argv[]){
 
     int serverfd = getListener();
     if (serverfd == -1) {
-        printf("listener descriptor failed: %d", serverfd);
+        printf("listener descriptor failed: %d\n", serverfd);
     }
 
     struct sigaction sa;
