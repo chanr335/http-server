@@ -16,7 +16,7 @@
 #include <sys/stat.h>
 
 #define PORT "3000"
-#define BUFFER_SIZE 50
+#define BUFFER_SIZE 4096 
 
 void sigchld_handler(int s){
     (void)s; // quiet unused variable warning
@@ -88,7 +88,20 @@ int getListener(void){
     return sockfd;
 }
 
-void make_http_response(const char *file_name, const char *file_ext, char *response, size_t *response_len){
+void make_http_response(const char *file_name, const char *file_ext, char **response, size_t *response_len){
+
+    // if file DNE, return 404
+    int file_fd = open(file_name, O_RDONLY);
+    if (file_fd == -1){
+        const char *not_found = "HTTP/1.0 404 Not Found\n";
+        printf("HTTP/1.0 404 Not Found\r\n"
+               "Content-Type: text/plain\r\n"
+               "\r\n"
+               "404 Not Found");
+        *response_len = strlen(not_found);
+        strcpy(*response, not_found); 
+        return;
+    }
 
     // build the HTTP header
     char *mime_type = "text/html";
@@ -99,32 +112,22 @@ void make_http_response(const char *file_name, const char *file_ext, char *respo
            "\r\n",
            mime_type);
 
-    // if file DNE, return 404
-    int file_fd = open(file_name, O_RDONLY);
-    if (file_fd == -1){
-        printf("HTTP/1.0 404 Not Found\r\n"
-               "Content-Type: text/plain\r\n"
-               "\r\n"
-               "404 Not Found");
-        *response_len = strlen(response);
-        return;
-    }
-
     // get file size for content length
     struct stat file_stat;
     fstat(file_fd, &file_stat);
     off_t file_size = file_stat.st_size;
 
-    // copy header to response buffer
-    *response_len = 0;
-    memcpy(response, header, strlen(header));
-    *response_len += strlen(header);
+    // copy header + file size to response buffer
+    *response_len = strlen(header) + file_size;
+    *response = malloc(*response_len + 1);
+
+    memcpy(*response, header, strlen(header));
 
     // copy file to response buffer
-    ssize_t bytes_read;
-    while ((bytes_read = read(file_fd,
-                              response + *response_len,
-                              BUFFER_SIZE - *response_len)) > 0){ *response_len += bytes_read;}
+    ssize_t bytes_read, offset = strlen(header);
+    while ((bytes_read = read(file_fd, *response + offset, BUFFER_SIZE)) > 0){
+        offset+= bytes_read;
+    }
 
     free(header);
     close(file_fd);
@@ -152,9 +155,9 @@ void handle_client(int clientfd){
 
         char file_extension[] = "html";
 
-        char *response = (char *)malloc(BUFFER_SIZE * 2 * sizeof(char));
+        char *response = NULL; // initialize as NULL because ill malloc in make_http_response
         size_t response_len;
-        make_http_response(file_name, file_extension, response, &response_len);
+        make_http_response(file_name, file_extension, &response, &response_len);
 
         send(clientfd, response, response_len, 0);
 

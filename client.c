@@ -13,7 +13,7 @@
 #include <regex.h>
 
 #define PORT "3000"
-#define BUFFER_SIZE 50
+#define BUFFER_SIZE 4096 
 
 void *get_in_addr(struct sockaddr *sa){
     if (sa ->sa_family == AF_INET){
@@ -69,9 +69,6 @@ int findListener(char *hostname){
 }
 
 int main(int argc, char *argv[]){
-    int numbytes;
-    char buf[] = "GET /rfc1945f.html HTTP/1";
-
     if(argc != 2){
         fprintf(stderr, "usage: client hostname\n");
         exit(1);
@@ -82,13 +79,30 @@ int main(int argc, char *argv[]){
         printf("finding listener descriptor failed: %d", serverfd);
     }
 
-    if ((numbytes = send(serverfd, buf, BUFFER_SIZE-1, 0)) == -1){
+    const char *request = "GET /helloworld.html HTTP/1.0\r\n\r\n";
+    ssize_t numbytes = send(serverfd, request, strlen(request), 0);
+    if (numbytes == -1) {
         perror("send");
+        close(serverfd);
         exit(1);
     }
 
-    buf[numbytes] = '\0';
-    // printf("client: received '%s'\n", buf);
+    printf("client: sent request:\n%s\n", request);
+    printf("client: waiting for response...\n\n");
+
+    // loop to receive the full response (headers + file)
+    char buf[BUFFER_SIZE];
+    while ((numbytes = recv(serverfd, buf, sizeof(buf) - 1, 0)) > 0) {
+        buf[numbytes] = '\0';   // null terminate buffer
+        printf("%s", buf);     
+    }
+
+    if (numbytes == -1) {
+        perror("recv");
+    } else {
+        printf("\nclient: connection closed by server.\n");
+    }
+
     close(serverfd);
     return 0;
 }
